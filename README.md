@@ -76,7 +76,6 @@ The bot logs all activities to `instabot.log` for debugging and monitoring purpo
 - `selenium`: For web automation.
 - `webdriver_manager`: For managing web drivers.
 - `customtkinter`: For the graphical user interface.
-- `requests`, `beautifulsoup4`: For handling HTTP requests and parsing HTML (if needed).
 
 Install these dependencies using the following command:
 ```bash
