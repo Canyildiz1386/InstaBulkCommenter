@@ -1,4 +1,6 @@
 
+### 7. `main.py`
+```python
 import json
 import time
 import random
@@ -11,12 +13,9 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-import requests
 
 logging.basicConfig(filename='instabot.log', level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
-
-SCRAPER_API_KEY = '91779949e54b37027b7c914dd06b8831'  # جایگزین کردن با API key خود
 
 def read_data(file_path):
     try:
@@ -51,7 +50,7 @@ def read_comments(file_path):
 def login(driver, username, password):
     try:
         driver.get("https://www.instagram.com/accounts/login/")
-        time.sleep(random.uniform(3, 5))
+        time.sleep(2)
 
         username_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.NAME, "username"))
@@ -59,7 +58,6 @@ def login(driver, username, password):
         password_input = driver.find_element(By.NAME, "password")
 
         username_input.send_keys(username)
-        time.sleep(random.uniform(1, 2))
         password_input.send_keys(password)
         password_input.send_keys(Keys.RETURN)
 
@@ -75,18 +73,17 @@ def login(driver, username, password):
 def post_comment(driver, post_url, comment_text):
     try:
         driver.get(post_url)
-        time.sleep(random.uniform(3, 5))
-
-        comment_box = WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
         )
+
+        comment_box = driver.find_element(By.CSS_SELECTOR, "textarea")
         comment_box.click()
         comment_box = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
         )
 
         comment_box.send_keys(comment_text)
-        time.sleep(random.uniform(1, 2))
         comment_box.send_keys(Keys.RETURN)
         
         logging.info('Comment posted: %s', comment_text)
@@ -95,36 +92,31 @@ def post_comment(driver, post_url, comment_text):
         logging.error('Failed to post comment: %s', e)
         return False
 
-def get_proxied_url(url):
-    return f'http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={url}'
-
 def post_comments(data, post_url, comments):
     if data is None:
         logging.error('No data to process')
         return
-
-    proxied_post_url = get_proxied_url(post_url)
 
     for account in data['accounts']:
         username = account['username']
         password = account['password']
         
         chrome_options = Options()
-        print(get_proxied_url(""))
-        chrome_options.add_argument('--proxy-server=%s' % get_proxied_url(""))
-
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-gpu")
+        
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
         
         if login(driver, username, password):
             for comment in comments:
                 success = False
                 while not success:
-                    if post_comment(driver, proxied_post_url, comment):
+                    if post_comment(driver, post_url, comment):
                         success = True
                         print(f'{username} posted comment: "{comment}" on {post_url}')
                     else:
-                        time.sleep(300)
-                time.sleep(random.uniform(60, 120))
+                        time.sleep(300)  # 5 دقیقه انتظار در صورت بروز مشکل
+                time.sleep(random.randint(60, 120))  # زمان انتظار تصادفی بین 1 تا 2 دقیقه برای هر کامنت
         
         driver.quit()
 
