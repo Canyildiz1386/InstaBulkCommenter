@@ -9,7 +9,7 @@ from add_order import add_order
 from telegram_bot_translation import get_translation, LANGUAGES  # Custom translation module to handle translations
 
 # Telegram bot token
-TOKEN = '7447231078:AAFOZU4vSUdMvinjFqQekzglFkVyFEdv_ys'
+TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'
 
 # States for ConversationHandler
 LANGUAGE, ADMIN_ACTIONS, ADD_ORDER_URL, ADD_ORDER_COMMENTS, ADD_ADMIN, ADD_USER_USERNAME, ADD_USER_PASSWORD, SHOWING_LIST = range(8)
@@ -137,13 +137,13 @@ async def save_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     num_accounts = len(account_usernames)
     num_comments = len(comments)
     
-    if num_comments < num_accounts:
-        comments *= (num_accounts // num_comments) + 1
-        comments = comments[:num_accounts]
-    elif num_comments > num_accounts:
-        comments = comments[:num_accounts]
-
-    add_order(user_data['post_url'], comments, account_usernames, SessionFactory)
+    # Split comments into chunks of size num_accounts
+    comment_chunks = [comments[i:i + num_accounts] for i in range(0, num_comments, num_accounts)]
+    
+    for chunk in comment_chunks:
+        comments_to_use = chunk[:num_accounts]
+        add_order(user_data['post_url'], comments_to_use, account_usernames, SessionFactory)
+    
     await update.message.reply_text(get_translation("✅ Order added successfully.", user_data['language']))
     await show_admin_actions(update, context)
     return ADMIN_ACTIONS

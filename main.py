@@ -4,11 +4,10 @@ import re
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.firefox.service import Service
-from webdriver_manager.firefox import GeckoDriverManager
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.chrome.options import Options
 import logging
 import threading
 from sqlalchemy import create_engine, Column, Integer, String, Text, Enum
@@ -17,13 +16,6 @@ from enum import Enum as PyEnum
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementClickInterceptedException
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
-# Disable all Selenium logging
-logging.getLogger('selenium').setLevel(logging.CRITICAL)
-logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-logging.getLogger('requests').setLevel(logging.CRITICAL)
-logging.getLogger('chardet').setLevel(logging.CRITICAL)
-logging.getLogger('selenium.webdriver.remote.remote_connection').setLevel(logging.CRITICAL)
 
 Base = declarative_base()
 
@@ -41,9 +33,11 @@ class Order(Base):
     status = Column(Enum(OrderStatus), default=OrderStatus.PENDING)
 
 def read_data(file_path):
+    print(f"Reading data from {file_path}")
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             data = json.load(file)
+        print("Data successfully read")
         return data
     except Exception as e:
         print(f'Error reading data from file: {e}')
@@ -60,9 +54,9 @@ def handle_suspicious_activity(driver):
         print(f'No dismiss button found: {e}')
 
 def login(driver, username, password):
+    print(f"Attempting to login with username: {username}")
     try:
         driver.get("https://www.instagram.com/accounts/login/")
-
         username_input = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.NAME, "username"))
         )
@@ -79,6 +73,7 @@ def login(driver, username, password):
             EC.presence_of_element_located((By.CSS_SELECTOR, "svg[aria-label='Home']"))
         )
 
+        print(f"Successfully logged in with username: {username}")
         return True
     except Exception as e:
         print(f'Failed to login with username {username}: {e}')
@@ -86,6 +81,7 @@ def login(driver, username, password):
 
 def post_comment(driver, post_url, comment_text, retries=3):
     for attempt in range(retries):
+        print(f"Attempt {attempt + 1} to post comment on {post_url}")
         try:
             driver.get(post_url)
             WebDriverWait(driver, 10).until(
@@ -101,7 +97,7 @@ def post_comment(driver, post_url, comment_text, retries=3):
                 close_button = driver.find_element(By.CSS_SELECTOR, "div[role='button'][aria-label='Close']")
                 close_button.click()
             except NoSuchElementException:
-                pass  
+                pass
 
             comment_box.click()
             comment_box = WebDriverWait(driver, 10).until(
@@ -114,6 +110,7 @@ def post_comment(driver, post_url, comment_text, retries=3):
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
             )
+            print("Comment posted successfully")
             return True
         except ElementClickInterceptedException as e:
             print(f'Attempt {attempt + 1} failed to post comment: {e}')
@@ -130,17 +127,18 @@ def post_comment(driver, post_url, comment_text, retries=3):
             return False
 
 def login_accounts(data):
+    print("Logging in all accounts")
     drivers = {}
     for account in data['accounts']:
         username = account['username']
         password = account['password']
-        
-        firefox_options = Options()
-        firefox_options.add_argument("--headless")
-        firefox_options.set_preference("dom.webdriver.enabled", False)
-        firefox_options.set_preference("dom.webnotifications.enabled", False)
 
-        driver = webdriver.Firefox(service=Service(GeckoDriverManager().install()), options=firefox_options)
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+
+        driver = webdriver.Chrome(service=Service('chromedriver.exe'), options=chrome_options)
         if login(driver, username, password):
             drivers[username] = driver
             print(f'{username} logged in successfully')
@@ -166,7 +164,7 @@ def process_order(driver, order_id, session_factory):
     else:
         order.status = OrderStatus.FAILED
         print(f'No active session for {account_username}')
-    
+
     session.commit()
     session.close()
 
@@ -177,6 +175,7 @@ def process_orders_concurrently(drivers, session_factory):
         session.close()
         threads = []
         if orders:
+            print("Processing new orders")
             for order in orders:
                 driver = drivers.get(order.account_username)
                 if driver:
@@ -209,12 +208,12 @@ class AccountsFileHandler(FileSystemEventHandler):
             username = account['username']
             if username not in self.drivers:
                 password = account['password']
-                firefox_options = Options()
-                firefox_options.add_argument("--headless")
-                firefox_options.set_preference("dom.webdriver.enabled", False)
-                firefox_options.set_preference("dom.webnotifications.enabled", False)
+                chrome_options = Options()
+                chrome_options.add_argument("--headless")
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--disable-dev-shm-usage')
 
-                driver = webdriver.Firefox(service=Service('geckodriver.exe'), options=firefox_options)
+                driver = webdriver.Chrome(service=Service('chromedriver.exe'), options=chrome_options)
                 if login(driver, username, password):
                     self.drivers[username] = driver
                     print(f'{username} logged in successfully')
@@ -224,7 +223,7 @@ class AccountsFileHandler(FileSystemEventHandler):
 if __name__ == "__main__":
     data_file = 'accounts.json'
     db_url = 'sqlite:///orders.db'
-    
+
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
     SessionFactory = sessionmaker(bind=engine)
@@ -236,7 +235,7 @@ if __name__ == "__main__":
         drivers = login_accounts(data)
         if drivers:
             print("All accounts logged in. Checking for new orders...")
-            
+
             event_handler = AccountsFileHandler(drivers, data_file, SessionFactory)
             observer = Observer()
             observer.schedule(event_handler, path='.', recursive=False)
