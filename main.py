@@ -1,13 +1,12 @@
 import json
 import time
-import re
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.firefox.options import Options
 import logging
 import threading
 from sqlalchemy import create_engine, Column, Integer, String, Text, Enum
@@ -16,6 +15,15 @@ from enum import Enum as PyEnum
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementClickInterceptedException
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+# Disable all logging
+logging.disable(logging.CRITICAL)
+
+# Suppress specific logging from urllib3 and selenium
+for logger_name in ['urllib3', 'selenium', 'selenium.webdriver.remote.remote_connection']:
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.CRITICAL)
+    logger.propagate = False
 
 Base = declarative_base()
 
@@ -46,12 +54,12 @@ def read_data(file_path):
 def handle_suspicious_activity(driver):
     try:
         dismiss_button = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "div[role='button'][aria-label='Dismiss']"))
+            EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[2]/div/div/div[1]/section/main/div[2]/div/div/div/div/div[1]/div/div/div[2]/div[2]/div'))
         )
         dismiss_button.click()
         print('Dismissed automated behavior warning.')
     except Exception as e:
-        print(f'No dismiss button found: {e}')
+        return None
 
 def login(driver, username, password):
     print(f"Attempting to login with username: {username}")
@@ -104,7 +112,10 @@ def post_comment(driver, post_url, comment_text, retries=3):
                 EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
             )
 
-            comment_box.send_keys(comment_text)
+            for char in comment_text:
+                comment_box.send_keys(char)
+                time.sleep(0.1)
+
             comment_box.send_keys(Keys.RETURN)
 
             WebDriverWait(driver, 10).until(
@@ -133,16 +144,15 @@ def login_accounts(data):
         username = account['username']
         password = account['password']
 
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
+        firefox_options = Options()
 
-        driver = webdriver.Chrome(service=Service('chromedriver.exe'), options=chrome_options)
+  
+        driver = webdriver.Firefox(service=Service('geckodriver.exe'), options=firefox_options)
         if login(driver, username, password):
             drivers[username] = driver
             print(f'{username} logged in successfully')
         else:
+            print(f'Failed to login with username: {username}')
             driver.quit()
     return drivers
 
@@ -188,7 +198,6 @@ def process_orders_concurrently(drivers, session_factory):
             for thread in threads:
                 thread.join()
 
-        time.sleep(10)
 
 class AccountsFileHandler(FileSystemEventHandler):
     def __init__(self, drivers, data_file, session_factory):
@@ -208,16 +217,17 @@ class AccountsFileHandler(FileSystemEventHandler):
             username = account['username']
             if username not in self.drivers:
                 password = account['password']
-                chrome_options = Options()
-                chrome_options.add_argument("--headless")
-                chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--disable-dev-shm-usage')
+                firefox_options = Options()
+                firefox_options.add_argument("--headless")
+                firefox_options.add_argument('--no-sandbox')
+                firefox_options.add_argument('--disable-dev-shm-usage')
 
-                driver = webdriver.Chrome(service=Service('chromedriver.exe'), options=chrome_options)
+                driver = webdriver.Firefox(service=Service('geckodriver.exe'), options=firefox_options)
                 if login(driver, username, password):
                     self.drivers[username] = driver
                     print(f'{username} logged in successfully')
                 else:
+                    print(f'Failed to login with username: {username}')
                     driver.quit()
 
 if __name__ == "__main__":

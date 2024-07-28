@@ -4,12 +4,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler, ContextTypes
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from main import Base, Order, OrderStatus, read_data
+from main import Base, Order, OrderStatus, read_data, login_accounts
 from add_order import add_order
 from telegram_bot_translation import get_translation, LANGUAGES  # Custom translation module to handle translations
 
 # Telegram bot token
-TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'
+TOKEN = '7447231078:AAFOZU4vSUdMvinjFqQekzglFkVyFEdv_ys'
 
 # States for ConversationHandler
 LANGUAGE, ADMIN_ACTIONS, ADD_ORDER_URL, ADD_ORDER_COMMENTS, ADD_ADMIN, ADD_USER_USERNAME, ADD_USER_PASSWORD, SHOWING_LIST = range(8)
@@ -218,7 +218,21 @@ async def save_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     with open(data_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-    await update.message.reply_text(get_translation("✅ User added successfully.", user_data['language']))
+    # Log in the new account
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    driver = webdriver.Chrome(service=Service('chromedriver.exe'), options=chrome_options)
+    
+    if login(driver, new_username, new_password):
+        context.user_data['drivers'][new_username] = driver
+        print(f'{new_username} logged in successfully')
+        await update.message.reply_text(get_translation("✅ User added and logged in successfully.", user_data['language']))
+    else:
+        driver.quit()
+        await update.message.reply_text(get_translation("⚠️ User added but failed to log in.", user_data['language']))
+
     await show_admin_actions(update, context)
     return ADMIN_ACTIONS
 
