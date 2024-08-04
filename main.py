@@ -54,7 +54,7 @@ def read_data(file_path):
 def handle_suspicious_activity(driver):
     try:
         dismiss_button = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[2]/div/div/div[1]/section/main/div[2]/div/div/div/div/div[1]/div/div/div[2]/div[2]/div'))
+            EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[2]/div/div/div[1]/section/main/div[2]/div/div/div/div/div[1]/div/div/div[2]/div[2]/div/div[2]'))
         )
         dismiss_button.click()
         print('Dismissed automated behavior warning.')
@@ -65,11 +65,20 @@ def login(driver, username, password):
     print(f"Attempting to login with username: {username}")
     try:
         driver.get("https://www.instagram.com/accounts/login/")
+
+        try:
+            login_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Log In')]"))
+            )
+            login_button.click()
+        except (NoSuchElementException, TimeoutException):
+            pass  # No login button found, proceed to look for input fields
+
         username_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.NAME, "username"))
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[1]/div/label/input"))
         )
         password_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.NAME, "password"))
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[2]/div/label/input"))
         )
 
         username_input.send_keys(username)
@@ -77,15 +86,12 @@ def login(driver, username, password):
         password_input.send_keys(Keys.RETURN)
 
         handle_suspicious_activity(driver)
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "svg[aria-label='Home']"))
-        )
-
         print(f"Successfully logged in with username: {username}")
         return True
     except Exception as e:
         print(f'Failed to login with username {username}: {e}')
         return False
+
 
 def post_comment(driver, post_url, comment_text, retries=3):
     for attempt in range(retries):
@@ -93,12 +99,12 @@ def post_comment(driver, post_url, comment_text, retries=3):
         try:
             driver.get(post_url)
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
             )
-            comment_box = driver.find_element(By.CSS_SELECTOR, "textarea")
+            comment_box = driver.find_element(By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea")
             driver.execute_script("arguments[0].scrollIntoView();", comment_box)
             WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "textarea"))
+                EC.element_to_be_clickable((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
             )
 
             try:
@@ -109,7 +115,7 @@ def post_comment(driver, post_url, comment_text, retries=3):
 
             comment_box.click()
             comment_box = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
             )
 
             for char in comment_text:
@@ -119,7 +125,7 @@ def post_comment(driver, post_url, comment_text, retries=3):
             comment_box.send_keys(Keys.RETURN)
 
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "textarea"))
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
             )
             print("Comment posted successfully")
             return True
