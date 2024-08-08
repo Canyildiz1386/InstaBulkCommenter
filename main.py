@@ -1,273 +1,209 @@
-import json
+import logging
 import time
+import threading
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.firefox.service import Service
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.firefox.options import Options
-import logging
-import threading
-from sqlalchemy import create_engine, Column, Integer, String, Text, Enum
-from sqlalchemy.orm import declarative_base, sessionmaker
-from enum import Enum as PyEnum
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementClickInterceptedException
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from sqlalchemy import create_engine, Column, String, Integer
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import IntegrityError
+import pickle
+import os
 
-# Disable all logging
-logging.disable(logging.CRITICAL)
-
-# Suppress specific logging from urllib3 and selenium
-for logger_name in ['urllib3', 'selenium', 'selenium.webdriver.remote.remote_connection']:
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.CRITICAL)
-    logger.propagate = False
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 Base = declarative_base()
 
-class OrderStatus(PyEnum):
-    PENDING = 'pending'
-    COMPLETED = 'completed'
-    FAILED = 'failed'
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, unique=True, nullable=False)
+    password = Column(String, nullable=False)
+    cookie_path = Column(String, nullable=False)
 
-class Order(Base):
-    __tablename__ = 'orders'
-    id = Column(Integer, primary_key=True)
-    post_url = Column(Text, nullable=False)
-    comment = Column(Text, nullable=False)
-    account_username = Column(String, nullable=False)
-    status = Column(Enum(OrderStatus), default=OrderStatus.PENDING)
+engine = create_engine('sqlite:///users.db')
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
+session = Session()
 
-def read_data(file_path):
-    print(f"Reading data from {file_path}")
+def add_user(username, password, cookie_path):
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            data = json.load(file)
-        print("Data successfully read")
-        return data
-    except Exception as e:
-        print(f'Error reading data from file: {e}')
-        return None
+        user = User(username=username, password=password, cookie_path=cookie_path)
+        session.add(user)
+        session.commit()
+        print(f"✅ User {username} added to the database.")
+    except IntegrityError:
+        session.rollback()
+        print(f"⚠️ User {username} already exists in the database.")
 
-def handle_suspicious_activity(driver):
-    try:
-        dismiss_button = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[2]/div/div/div[1]/section/main/div[2]/div/div/div/div/div[1]/div/div/div[2]/div[2]/div/div[2]'))
-        )
-        dismiss_button.click()
-        print('Dismissed automated behavior warning.')
-    except Exception as e:
-        return None
+add_user("Canyildiz1386", "Rahyab1357", "cookies_Canyildiz1386.pkl")
 
-def login(driver, username, password):
-    print(f"Attempting to login with username: {username}")
-    try:
-        driver.get("https://www.instagram.com/accounts/login/")
+def get_user(username):
+    return session.query(User).filter_by(username=username).first()
 
-        try:
-            login_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Log In')]"))
-            )
-            login_button.click()
-        except (NoSuchElementException, TimeoutException):
-            pass  # No login button found, proceed to look for input fields
+def login_instagram(driver, username, password):
+    print(f"🔑 Logging in as {username}...")
+    driver.get("https://www.instagram.com/accounts/login/")
+    time.sleep(3)
+    username_input = driver.find_element(By.NAME, "username")
+    password_input = driver.find_element(By.NAME, "password")
+    username_input.send_keys(username)
+    password_input.send_keys(password)
+    password_input.send_keys(Keys.ENTER)
+    time.sleep(5)
+    print(f"✅ Logged in as {username}")
 
-        username_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[1]/div/label/input"))
-        )
-        password_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[2]/div/label/input"))
-        )
+def save_cookies(driver, path):
+    print(f"💾 Saving cookies to {path}...")
+    with open(path, "wb") as file:
+        pickle.dump(driver.get_cookies(), file)
+    print(f"✅ Cookies saved to {path}")
 
-        username_input.send_keys(username)
-        password_input.send_keys(password)
-        password_input.send_keys(Keys.RETURN)
+def load_cookies(driver, path):
+    print(f"🍪 Loading cookies from {path}...")
+    driver.get("https://www.instagram.com/")
+    time.sleep(3)
+    with open(path, "rb") as file:
+        cookies = pickle.load(file)
+        for cookie in cookies:
+            driver.add_cookie(cookie)
+    driver.refresh()
+    time.sleep(5)
+    print(f"✅ Cookies loaded from {path}")
 
-        handle_suspicious_activity(driver)
-        print(f"Successfully logged in with username: {username}")
-        return True
-    except Exception as e:
-        print(f'Failed to login with username {username}: {e}')
-        return False
-
-
-def post_comment(driver, post_url, comment_text, retries=3):
-    for attempt in range(retries):
-        print(f"Attempt {attempt + 1} to post comment on {post_url}")
-        try:
-            driver.get(post_url)
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
-            )
-            comment_box = driver.find_element(By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea")
-            driver.execute_script("arguments[0].scrollIntoView();", comment_box)
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
-            )
-
-            try:
-                close_button = driver.find_element(By.CSS_SELECTOR, "div[role='button'][aria-label='Close']")
-                close_button.click()
-            except NoSuchElementException:
-                pass
-
-            comment_box.click()
-            comment_box = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
-            )
-
-            for char in comment_text:
-                comment_box.send_keys(char)
-                time.sleep(0.1)
-
-            comment_box.send_keys(Keys.RETURN)
-
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/div/div[1]/div/div[2]/div/div[4]/section/div/form/div/textarea"))
-            )
-            print("Comment posted successfully")
-            return True
-        except ElementClickInterceptedException as e:
-            print(f'Attempt {attempt + 1} failed to post comment: {e}')
-            if attempt == retries - 1:
-                return False
-            time.sleep(5)
-        except (NoSuchElementException, TimeoutException) as e:
-            print(f'Attempt {attempt + 1} failed to post comment: {e}')
-            if attempt == retries - 1:
-                return False
-            time.sleep(5)
-        except Exception as e:
-            print(f'An unexpected error occurred: {e}')
-            return False
-
-def login_accounts(data):
-    print("Logging in all accounts")
-    drivers = {}
-    for account in data['accounts']:
-        username = account['username']
-        password = account['password']
-
-        firefox_options = Options()
-
-        firefox_options.add_argument("--headless")
-        firefox_options.add_argument('--no-sandbox')
-        firefox_options.add_argument('--disable-dev-shm-usage')
-        driver = webdriver.Firefox(service=Service('geckodriver.exe'), options=firefox_options)
-        if login(driver, username, password):
-            drivers[username] = driver
-            print(f'{username} logged in successfully')
-        else:
-            print(f'Failed to login with username: {username}')
-            driver.quit()
-    return drivers
-
-def process_order(driver, order_id, session_factory):
-    session = session_factory()
-    order = session.query(Order).get(order_id)
-    post_url = order.post_url
-    comment = order.comment
-    account_username = order.account_username
-
-    if driver:
-        success = post_comment(driver, post_url, comment)
-        if success:
-            order.status = OrderStatus.COMPLETED
-            print(f'Order {order.id} completed by {account_username}')
-        else:
-            order.status = OrderStatus.FAILED
-            print(f'Failed to post comment for order {order.id} by {account_username}')
+def login_or_load_cookies(driver, user):
+    cookie_path = user.cookie_path
+    if cookie_path and os.path.exists(cookie_path):
+        load_cookies(driver, cookie_path)
     else:
-        order.status = OrderStatus.FAILED
-        print(f'No active session for {account_username}')
+        login_instagram(driver, user.username, user.password)
+        save_cookies(driver, cookie_path)
 
-    session.commit()
-    session.close()
+def comment_on_post(driver, post_url, comment_text):
+    print(f"💬 Commenting on post: {post_url}...")
+    driver.get(post_url)
+    time.sleep(3)
+    comment_box = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
+    )
+    comment_box.click()
+    comment_box_active = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
+    )
+    comment_box_active.send_keys(comment_text)
+    comment_box_active.send_keys(Keys.ENTER)
+    time.sleep(3)
+    print(f"✅ Commented on post: {post_url}")
 
-def process_orders_concurrently(drivers, session_factory):
-    while True:
-        session = session_factory()
-        orders = session.query(Order).filter(Order.status == OrderStatus.PENDING).all()
-        session.close()
+def like_post(driver, post_url):
+    print(f"❤️ Liking post: {post_url}...")
+    driver.get(post_url)
+    time.sleep(3)
+    like_button = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, '//span[@aria-label="Like"]'))
+    )
+    like_button.click()
+    time.sleep(2)
+    print(f"✅ Liked post: {post_url}")
+
+def process_account(user, post_url, comment_text=None, likes=0):
+    print(f"🚀 Starting process for {user.username}...")
+    service = FirefoxService(GeckoDriverManager().install())
+    driver = webdriver.Firefox(service=service)
+    try:
+        login_or_load_cookies(driver, user)
+        if comment_text:
+            for comment in comment_text:
+                comment_on_post(driver, post_url, comment)
+        for _ in range(likes):
+            like_post(driver, post_url)
+    finally:
+        driver.quit()
+        print(f"🔒 Closed browser for {user.username}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton("Comment", callback_data='comment'),
+            InlineKeyboardButton("Like", callback_data='like'),
+            InlineKeyboardButton("Add User", callback_data='add_user')
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text('What do you want to do?', reply_markup=reply_markup)
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == 'comment':
+        await query.edit_message_text(text="Send me the post URL.")
+        context.user_data['action'] = 'comment_url'
+    elif query.data == 'like':
+        await query.edit_message_text(text="Send me the post URL.")
+        context.user_data['action'] = 'like_url'
+    elif query.data == 'add_user':
+        await query.edit_message_text(text="Send me the username, password, and cookie path separated by commas.")
+        context.user_data['action'] = 'add_user'
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    action = context.user_data.get('action')
+    if action == 'comment_url':
+        context.user_data['post_url'] = update.message.text
+        context.user_data['action'] = 'comment_texts'
+        await update.message.reply_text("Now, send me the comments separated by new lines.")
+    elif action == 'comment_texts':
+        post_url = context.user_data.get('post_url')
+        comments = update.message.text.split('\n')
+        comments = [comment.strip() for comment in comments if comment.strip()]
+        users = session.query(User).all()
         threads = []
-        if orders:
-            print("Processing new orders")
-            for order in orders:
-                driver = drivers.get(order.account_username)
-                if driver:
-                    thread = threading.Thread(target=process_order, args=(driver, order.id, session_factory))
-                    threads.append(thread)
-                    thread.start()
-                else:
-                    print(f"No driver found for {order.account_username}, skipping order {order.id}")
-
+        for user in users:
+            thread = threading.Thread(target=process_account, args=(user, post_url, comments))
+            threads.append(thread)
+            thread.start()
+        for thread in threads:
+            thread.join()
+        await update.message.reply_text(f"🏁 All comments have been posted.")
+    elif action == 'like_url':
+        context.user_data['post_url'] = update.message.text
+        context.user_data['action'] = 'like_count'
+        await update.message.reply_text("How many likes do you want to give?")
+    elif action == 'like_count':
+        try:
+            post_url = context.user_data.get('post_url')
+            likes = int(update.message.text)
+            users = session.query(User).all()
+            threads = []
+            for user in users:
+                thread = threading.Thread(target=process_account, args=(user, post_url, None, likes))
+                threads.append(thread)
+                thread.start()
             for thread in threads:
                 thread.join()
+            await update.message.reply_text(f"🏁 All likes have been completed.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ An error occurred: {e}")
+    elif action == 'add_user':
+        try:
+            username, password, cookie_path = update.message.text.split(',')
+            add_user(username.strip(), password.strip(), cookie_path.strip())
+            await update.message.reply_text(f"✅ User {username.strip()} added to the database.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ An error occurred: {e}")
 
+def main():
+    application = ApplicationBuilder().token('7325149894:AAGTxEjEVB5pFuV-kGN_4dEOCdX5GRfsVzo').build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.run_polling()
 
-class AccountsFileHandler(FileSystemEventHandler):
-    def __init__(self, drivers, data_file, session_factory):
-        self.drivers = drivers
-        self.data_file = data_file
-        self.session_factory = session_factory
-
-    def on_modified(self, event):
-        if event.src_path.endswith(self.data_file):
-            print("accounts.json has been modified.")
-            new_data = read_data(self.data_file)
-            if new_data:
-                self.update_accounts(new_data)
-
-    def update_accounts(self, new_data):
-        for account in new_data['accounts']:
-            username = account['username']
-            if username not in self.drivers:
-                password = account['password']
-                firefox_options = Options()
-                firefox_options.add_argument("--headless")
-                firefox_options.add_argument('--no-sandbox')
-                firefox_options.add_argument('--disable-dev-shm-usage')
-
-                driver = webdriver.Firefox(service=Service('geckodriver.exe'), options=firefox_options)
-                if login(driver, username, password):
-                    self.drivers[username] = driver
-                    print(f'{username} logged in successfully')
-                else:
-                    print(f'Failed to login with username: {username}')
-                    driver.quit()
-
-if __name__ == "__main__":
-    data_file = 'accounts.json'
-    db_url = 'sqlite:///orders.db'
-
-    engine = create_engine(db_url)
-    Base.metadata.create_all(engine)
-    SessionFactory = sessionmaker(bind=engine)
-
-    start = time.time()
-    data = read_data(data_file)
-
-    if data:
-        drivers = login_accounts(data)
-        if drivers:
-            print("All accounts logged in. Checking for new orders...")
-
-            event_handler = AccountsFileHandler(drivers, data_file, SessionFactory)
-            observer = Observer()
-            observer.schedule(event_handler, path='.', recursive=False)
-            observer.start()
-
-            try:
-                process_orders_concurrently(drivers, SessionFactory)
-            except KeyboardInterrupt:
-                observer.stop()
-            observer.join()
-        else:
-            print("Failed to log in any accounts.")
-    else:
-        print("No account data found.")
-
-    finish = time.time() - start
-    print(f'Finished in {round(finish, 2)} seconds')
+if __name__ == '__main__':
+    main()
