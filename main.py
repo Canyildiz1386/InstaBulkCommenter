@@ -10,7 +10,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from sqlalchemy import create_engine, Column, String, Integer
+from sqlalchemy import create_engine, Column, String, Integer, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
@@ -27,11 +27,24 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     password = Column(String, nullable=False)
     cookie_path = Column(String, nullable=False)
+    driver_session = Column(Boolean, default=False)
+
+class Order(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, nullable=False)
+    post_url = Column(String, nullable=False)
+    action_type = Column(String, nullable=False)  # 'comment' or 'like'
+    status = Column(String, nullable=False)  # 'pending', 'completed', 'failed'
+    retries = Column(Integer, default=0)
 
 engine = create_engine('sqlite:///users.db')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
+
+# Store active driver sessions globally
+active_drivers = {}
 
 def add_user(username, password, cookie_path):
     try:
@@ -43,10 +56,24 @@ def add_user(username, password, cookie_path):
         session.rollback()
         print(f"⚠️ User {username} already exists in the database.")
 
-add_user("Canyildiz1386", "Rahyab1357", "cookies_Canyildiz1386.pkl")
-
 def get_user(username):
     return session.query(User).filter_by(username=username).first()
+
+def save_order(username, post_url, action_type):
+    order = Order(username=username, post_url=post_url, action_type=action_type, status='pending')
+    session.add(order)
+    session.commit()
+    return order.id
+
+def update_order_status(order_id, status):
+    order = session.query(Order).filter_by(id=order_id).first()
+    order.status = status
+    session.commit()
+
+def increment_order_retries(order_id):
+    order = session.query(Order).filter_by(id=order_id).first()
+    order.retries += 1
+    session.commit()
 
 def login_instagram(driver, username, password):
     print(f"🔑 Logging in as {username}...")
@@ -87,46 +114,87 @@ def login_or_load_cookies(driver, user):
         save_cookies(driver, cookie_path)
 
 def comment_on_post(driver, post_url, comment_text):
-    print(f"💬 Commenting on post: {post_url}...")
-    driver.get(post_url)
-    time.sleep(3)
-    comment_box = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
-    )
-    comment_box.click()
-    comment_box_active = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
-    )
-    comment_box_active.send_keys(comment_text)
-    comment_box_active.send_keys(Keys.ENTER)
-    time.sleep(3)
-    print(f"✅ Commented on post: {post_url}")
+    for attempt in range(3):
+        try:
+            print(f"💬 Commenting on post: {post_url}...")
+            driver.get(post_url)
+            time.sleep(3)
+            comment_box = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
+            )
+            comment_box.click()
+            comment_box_active = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
+            )
+            comment_box_active.send_keys(comment_text)
+            comment_box_active.send_keys(Keys.ENTER)
+            time.sleep(3)
+            print(f"✅ Commented on post: {post_url}")
+            return True
+        except Exception as e:
+            print(f"❌ Error commenting on post: {post_url} - {e}")
+            time.sleep(2)
+    return False
 
 def like_post(driver, post_url):
-    print(f"❤️ Liking post: {post_url}...")
-    driver.get(post_url)
-    time.sleep(3)
-    like_button = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, '//span[@aria-label="Like"]'))
-    )
-    like_button.click()
-    time.sleep(2)
-    print(f"✅ Liked post: {post_url}")
+    for attempt in range(3):
+        try:
+            print(f"❤️ Liking post: {post_url}...")
+            driver.get(post_url)
+            time.sleep(3)
+            like_button = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//span[@aria-label="Like"]'))
+            )
+            like_button.click()
+            time.sleep(2)
+            print(f"✅ Liked post: {post_url}")
+            return True
+        except Exception as e:
+            print(f"❌ Error liking post: {post_url} - {e}")
+            time.sleep(2)
+    return False
 
 def process_account(user, post_url, comment_text=None, likes=0):
     print(f"🚀 Starting process for {user.username}...")
-    service = FirefoxService(GeckoDriverManager().install())
-    driver = webdriver.Firefox(service=service)
-    try:
+
+    driver = active_drivers.get(user.username)
+
+    if not driver:
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
         login_or_load_cookies(driver, user)
+        active_drivers[user.username] = driver
+        user.driver_session = True
+        session.commit()
+
+    completed_comments = 0
+    completed_likes = 0
+
+    try:
         if comment_text:
+            order_id = save_order(user.username, post_url, 'comment')
             for comment in comment_text:
-                comment_on_post(driver, post_url, comment)
+                success = comment_on_post(driver, post_url, comment)
+                if success:
+                    completed_comments += 1
+                    update_order_status(order_id, 'completed')
+                else:
+                    increment_order_retries(order_id)
+                    update_order_status(order_id, 'failed')
+                    break
+
         for _ in range(likes):
-            like_post(driver, post_url)
+            order_id = save_order(user.username, post_url, 'like')
+            success = like_post(driver, post_url)
+            if success:
+                completed_likes += 1
+                update_order_status(order_id, 'completed')
+            else:
+                increment_order_retries(order_id)
+                update_order_status(order_id, 'failed')
+                break
     finally:
-        driver.quit()
-        print(f"🔒 Closed browser for {user.username}")
+        print(f"🔒 Browser session remains open for {user.username}.")
+        return completed_comments, completed_likes
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -149,8 +217,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text="Send me the post URL.")
         context.user_data['action'] = 'like_url'
     elif query.data == 'add_user':
-        await query.edit_message_text(text="Send me the username, password, and cookie path separated by commas.")
-        context.user_data['action'] = 'add_user'
+        await query.edit_message_text(text="Please send me the username.")
+        context.user_data['action'] = 'add_user_username'
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get('action')
@@ -163,42 +231,76 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         comments = update.message.text.split('\n')
         comments = [comment.strip() for comment in comments if comment.strip()]
         users = session.query(User).all()
-        threads = []
+        total_comments = len(comments)
         for user in users:
-            thread = threading.Thread(target=process_account, args=(user, post_url, comments))
-            threads.append(thread)
-            thread.start()
-        for thread in threads:
-            thread.join()
-        await update.message.reply_text(f"🏁 All comments have been posted.")
+            completed_comments, _ = process_account(user, post_url, comments)
+            await update.message.reply_text(
+                f"User {user.username} has completed {completed_comments}/{total_comments} comments."
+            )
+        await update.message.reply_text(f"🏁 All comment actions have been processed.")
     elif action == 'like_url':
         context.user_data['post_url'] = update.message.text
         context.user_data['action'] = 'like_count'
-        await update.message.reply_text("How many likes do you want to give?")
+        await update.message.reply_text("How many likes do you want to give? (Max 10)")
     elif action == 'like_count':
         try:
             post_url = context.user_data.get('post_url')
             likes = int(update.message.text)
+            if likes > 10:
+                await update.message.reply_text("You can request a maximum of 10 likes.")
+                likes = 10
             users = session.query(User).all()
-            threads = []
             for user in users:
-                thread = threading.Thread(target=process_account, args=(user, post_url, None, likes))
-                threads.append(thread)
-                thread.start()
-            for thread in threads:
-                thread.join()
-            await update.message.reply_text(f"🏁 All likes have been completed.")
+                _, completed_likes = process_account(user, post_url, None, likes)
+                await update.message.reply_text(
+                    f"User {user.username} has completed {completed_likes}/{likes} likes."
+                )
+            await update.message.reply_text(f"🏁 All like actions have been completed.")
         except Exception as e:
             await update.message.reply_text(f"❌ An error occurred: {e}")
-    elif action == 'add_user':
+    elif action == 'add_user_username':
+        context.user_data['username'] = update.message.text.strip()
+        context.user_data['action'] = 'add_user_password'
+        await update.message.reply_text("Please send me the password.")
+    elif action == 'add_user_password':
+        username = context.user_data.get('username')
+        password = update.message.text.strip()
+        cookie_folder = 'cookie'
+        os.makedirs(cookie_folder, exist_ok=True)
+        cookie_path = os.path.join(cookie_folder, f'cookie_{username}.pkl')
+        add_user(username, password, cookie_path)
+
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
+        new_user = get_user(username)
         try:
-            username, password, cookie_path = update.message.text.split(',')
-            add_user(username.strip(), password.strip(), cookie_path.strip())
-            await update.message.reply_text(f"✅ User {username.strip()} added to the database.")
+            login_or_load_cookies(driver, new_user)
+            active_drivers[username] = driver  # Store the active driver session
+            new_user.driver_session = True
+            session.commit()
+            await update.message.reply_text(f"✅ User {username} added to the database and logged in successfully.")
         except Exception as e:
-            await update.message.reply_text(f"❌ An error occurred: {e}")
+            await update.message.reply_text(f"❌ User {username} added but login failed: {e}")
+        finally:
+            # Keep the browser session open for further use
+            context.user_data['driver'] = driver
+
+def login_all_users():
+    users = session.query(User).all()
+    for user in users:
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
+        try:
+            login_or_load_cookies(driver, user)
+            active_drivers[user.username] = driver  # Store the active driver session
+            user.driver_session = True
+            session.commit()
+            print(f"✅ Successfully logged in for user {user.username}")
+        except Exception as e:
+            print(f"❌ Failed to log in for user {user.username}: {e}")
+            driver.quit()
 
 def main():
+    login_all_users()
+
     application = ApplicationBuilder().token('7325149894:AAGTxEjEVB5pFuV-kGN_4dEOCdX5GRfsVzo').build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
