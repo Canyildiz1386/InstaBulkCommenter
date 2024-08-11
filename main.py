@@ -7,6 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options
 from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -34,7 +35,7 @@ class Order(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String, nullable=False)
     post_url = Column(String, nullable=False)
-    action_type = Column(String, nullable=False)  # 'comment' or 'like'
+    action_type = Column(String, nullable=False)  # 'comment' or 'reply'
     status = Column(String, nullable=False)  # 'pending', 'completed', 'failed'
     retries = Column(Integer, default=0)
 
@@ -136,38 +137,45 @@ def comment_on_post(driver, post_url, comment_text):
             time.sleep(2)
     return False
 
-def like_post(driver, post_url):
+def reply_to_story(driver, story_url, reply_text):
     for attempt in range(3):
         try:
-            print(f"❤️ Liking post: {post_url}...")
-            driver.get(post_url)
+            print(f"💬 Replying to story: {story_url}...")
+            driver.get(story_url)
             time.sleep(3)
-            like_button = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//span[@aria-label="Like"]'))
+            reply_box = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Send Message…"]'))
             )
-            like_button.click()
-            time.sleep(2)
-            print(f"✅ Liked post: {post_url}")
+            reply_box.click()
+            reply_box_active = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Send Message…"]'))
+            )
+            reply_box_active.send_keys(reply_text)
+            reply_box_active.send_keys(Keys.ENTER)
+            time.sleep(3)
+            print(f"✅ Replied to story: {story_url}")
             return True
         except Exception as e:
-            print(f"❌ Error liking post: {post_url} - {e}")
+            print(f"❌ Error replying to story: {story_url} - {e}")
             time.sleep(2)
     return False
 
-def process_account(user, post_url, comment_text=None, likes=0):
+def process_account(user, post_url=None, comment_text=None, story_url=None, reply_text=None):
     print(f"🚀 Starting process for {user.username}...")
 
     driver = active_drivers.get(user.username)
 
     if not driver:
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
+        options = Options()
+        options.headless = True  # Run in headless mode
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
         login_or_load_cookies(driver, user)
         active_drivers[user.username] = driver
         user.driver_session = True
         session.commit()
 
     completed_comments = 0
-    completed_likes = 0
+    completed_replies = 0
 
     try:
         if comment_text:
@@ -182,42 +190,44 @@ def process_account(user, post_url, comment_text=None, likes=0):
                     update_order_status(order_id, 'failed')
                     break
 
-        for _ in range(likes):
-            order_id = save_order(user.username, post_url, 'like')
-            success = like_post(driver, post_url)
-            if success:
-                completed_likes += 1
-                update_order_status(order_id, 'completed')
-            else:
-                increment_order_retries(order_id)
-                update_order_status(order_id, 'failed')
-                break
+        if reply_text:
+            order_id = save_order(user.username, story_url, 'reply')
+            for reply in reply_text:
+                success = reply_to_story(driver, story_url, reply)
+                if success:
+                    completed_replies += 1
+                    update_order_status(order_id, 'completed')
+                else:
+                    increment_order_retries(order_id)
+                    update_order_status(order_id, 'failed')
+                    break
+
     finally:
         print(f"🔒 Browser session remains open for {user.username}.")
-        return completed_comments, completed_likes
+        return completed_comments, completed_replies
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("Comment", callback_data='comment'),
-            InlineKeyboardButton("Like", callback_data='like'),
-            InlineKeyboardButton("Add User", callback_data='add_user')
+            InlineKeyboardButton("💬 Comment", callback_data='comment'),
+            InlineKeyboardButton("📩 Reply to Story", callback_data='reply_to_story'),
+            InlineKeyboardButton("👤 Add User", callback_data='add_user')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text('What do you want to do?', reply_markup=reply_markup)
+    await update.message.reply_text('🤖 What do you want to do?', reply_markup=reply_markup)
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == 'comment':
-        await query.edit_message_text(text="Send me the post URL.")
+        await query.edit_message_text(text="📎 Send me the post URL.")
         context.user_data['action'] = 'comment_url'
-    elif query.data == 'like':
-        await query.edit_message_text(text="Send me the post URL.")
-        context.user_data['action'] = 'like_url'
+    elif query.data == 'reply_to_story':
+        await query.edit_message_text(text="📎 Send me the story URL.")
+        context.user_data['action'] = 'reply_to_story_url'
     elif query.data == 'add_user':
-        await query.edit_message_text(text="Please send me the username.")
+        await query.edit_message_text(text="👤 Please send me the username.")
         context.user_data['action'] = 'add_user_username'
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -225,7 +235,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == 'comment_url':
         context.user_data['post_url'] = update.message.text
         context.user_data['action'] = 'comment_texts'
-        await update.message.reply_text("Now, send me the comments separated by new lines.")
+        await update.message.reply_text("💬 Now, send me the comments separated by new lines.")
     elif action == 'comment_texts':
         post_url = context.user_data.get('post_url')
         comments = update.message.text.split('\n')
@@ -233,35 +243,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = session.query(User).all()
         total_comments = len(comments)
         for user in users:
-            completed_comments, _ = process_account(user, post_url, comments)
+            completed_comments, _ = process_account(user, post_url, comment_text=comments)
             await update.message.reply_text(
-                f"User {user.username} has completed {completed_comments}/{total_comments} comments."
+                f"👤 User {user.username} has completed {completed_comments}/{total_comments} comments."
             )
         await update.message.reply_text(f"🏁 All comment actions have been processed.")
-    elif action == 'like_url':
-        context.user_data['post_url'] = update.message.text
-        context.user_data['action'] = 'like_count'
-        await update.message.reply_text("How many likes do you want to give? (Max 10)")
-    elif action == 'like_count':
-        try:
-            post_url = context.user_data.get('post_url')
-            likes = int(update.message.text)
-            if likes > 10:
-                await update.message.reply_text("You can request a maximum of 10 likes.")
-                likes = 10
-            users = session.query(User).all()
-            for user in users:
-                _, completed_likes = process_account(user, post_url, None, likes)
-                await update.message.reply_text(
-                    f"User {user.username} has completed {completed_likes}/{likes} likes."
-                )
-            await update.message.reply_text(f"🏁 All like actions have been completed.")
-        except Exception as e:
-            await update.message.reply_text(f"❌ An error occurred: {e}")
+    elif action == 'reply_to_story_url':
+        context.user_data['story_url'] = update.message.text
+        context.user_data['action'] = 'reply_texts'
+        await update.message.reply_text("💬 Now, send me the replies separated by new lines.")
+    elif action == 'reply_texts':
+        story_url = context.user_data.get('story_url')
+        replies = update.message.text.split('\n')
+        replies = [reply.strip() for reply in replies if reply.strip()]
+        users = session.query(User).all()
+        total_replies = len(replies)
+        for user in users:
+            _, completed_replies = process_account(user, story_url=story_url, reply_text=replies)
+            await update.message.reply_text(
+                f"👤 User {user.username} has completed {completed_replies}/{total_replies} replies."
+            )
+        await update.message.reply_text(f"🏁 All reply actions have been processed.")
     elif action == 'add_user_username':
         context.user_data['username'] = update.message.text.strip()
         context.user_data['action'] = 'add_user_password'
-        await update.message.reply_text("Please send me the password.")
+        await update.message.reply_text("🔒 Please send me the password.")
     elif action == 'add_user_password':
         username = context.user_data.get('username')
         password = update.message.text.strip()
@@ -270,7 +276,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cookie_path = os.path.join(cookie_folder, f'cookie_{username}.pkl')
         add_user(username, password, cookie_path)
 
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
+        options = Options()
+        options.headless = True  # Run in headless mode
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
         new_user = get_user(username)
         try:
             login_or_load_cookies(driver, new_user)
@@ -287,7 +295,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def login_all_users():
     users = session.query(User).all()
     for user in users:
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
+        options = Options()
+        options.headless = True  # Run in headless mode
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
         try:
             login_or_load_cookies(driver, user)
             active_drivers[user.username] = driver  # Store the active driver session
