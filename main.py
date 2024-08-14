@@ -233,7 +233,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'add_user':
         await query.edit_message_text(text="👤 Please send me the username.")
         context.user_data['action'] = 'add_user_username'
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get('action')
     if action == 'comment_url':
@@ -246,12 +245,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         comments = [comment.strip() for comment in comments if comment.strip()]
         users = session.query(User).all()
         total_comments = len(comments)
+        total_users = len(users)
+
+        if total_users == 0:
+            await update.message.reply_text(f"⚠️ No users found in the database.")
+            return
+
+        comments_per_user = total_comments // total_users
+        remainder_comments = total_comments % total_users
+
+        comment_index = 0
         for user in users:
-            completed_comments, _ = process_account(user, post_url, comment_text=comments)
+            user_comments = comments[comment_index:comment_index + comments_per_user]
+            if remainder_comments > 0:
+                user_comments.append(comments[comment_index + comments_per_user])
+                remainder_comments -= 1
+                comment_index += 1
+            
+            completed_comments, _ = process_account(user, post_url, comment_text=user_comments)
             await update.message.reply_text(
-                f"👤 User {user.username} has completed {completed_comments}/{total_comments} comments."
+                f"👤 User {user.username} has completed {completed_comments}/{len(user_comments)} comments."
             )
+            comment_index += comments_per_user
+
         await update.message.reply_text(f"🏁 All comment actions have been processed.")
+    
     elif action == 'reply_to_story_url':
         context.user_data['story_url'] = update.message.text
         context.user_data['action'] = 'reply_texts'
