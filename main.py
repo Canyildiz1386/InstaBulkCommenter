@@ -78,8 +78,12 @@ def increment_order_retries(order_id):
 
 def login_instagram(driver, username, password):
     print(f"🔑 Logging in as {username}...")
-    driver.get("https://www.instagram.com/accounts/login/")
+    driver.get("https://www.instagram.com/")
     time.sleep(3)
+    try : 
+        driver.find_element(By.XPATH,"/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
+    except Exception :
+        pass 
     username_input = driver.find_element(By.NAME, "username")
     password_input = driver.find_element(By.NAME, "password")
     username_input.send_keys(username)
@@ -167,8 +171,8 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
 
     if not driver:
         options = Options()
-        options.headless = True  # Run in headless mode
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
+        options.add_argument('--headless')
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         login_or_load_cookies(driver, user)
         active_drivers[user.username] = driver
         user.driver_session = True
@@ -277,8 +281,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_user(username, password, cookie_path)
 
         options = Options()
-        options.headless = True  # Run in headless mode
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
+        options.add_argument('--headless')
+      
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         new_user = get_user(username)
         try:
             login_or_load_cookies(driver, new_user)
@@ -296,8 +301,8 @@ def login_all_users():
     users = session.query(User).all()
     for user in users:
         options = Options()
-        options.headless = True  # Run in headless mode
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
+        options.add_argument('--headless')
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         try:
             login_or_load_cookies(driver, user)
             active_drivers[user.username] = driver  # Store the active driver session
