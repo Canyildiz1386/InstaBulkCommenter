@@ -80,10 +80,10 @@ def login_instagram(driver, username, password):
     print(f"🔑 Logging in as {username}...")
     driver.get("https://www.instagram.com/")
     time.sleep(3)
-    try : 
-        driver.find_element(By.XPATH,"/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
-    except Exception :
-        pass 
+    try:
+        driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
+    except Exception:
+        pass
     username_input = driver.find_element(By.NAME, "username")
     password_input = driver.find_element(By.NAME, "password")
     username_input.send_keys(username)
@@ -112,8 +112,25 @@ def load_cookies(driver, path):
 
 def login_or_load_cookies(driver, user):
     cookie_path = user.cookie_path
+    
+    def is_logged_in(driver):
+        try:
+            # Check if the home page loads by waiting for the profile icon or some other element that's only visible when logged in
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//a[@href="/accounts/edit/"]'))
+            )
+            return True
+        except Exception:
+            return False
+    
     if cookie_path and os.path.exists(cookie_path):
         load_cookies(driver, cookie_path)
+        if not is_logged_in(driver):
+            print("⚠️ Cookies loaded but login failed. Trying to login again.")
+            login_instagram(driver, user.username, user.password)
+            save_cookies(driver, cookie_path)
+        else:
+            print(f"✅ Successfully logged in using cookies for {user.username}.")
     else:
         login_instagram(driver, user.username, user.password)
         save_cookies(driver, cookie_path)
@@ -233,6 +250,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'add_user':
         await query.edit_message_text(text="👤 Please send me the username.")
         context.user_data['action'] = 'add_user_username'
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get('action')
     if action == 'comment_url':
@@ -334,7 +352,7 @@ def login_all_users():
 def main():
     login_all_users()
 
-    application = ApplicationBuilder().token('7325149894:AAGTxEjEVB5pFuV-kGN_4dEOCdX5GRfsVzo').build()
+    application = ApplicationBuilder().token('7447231078:AAFOZU4vSUdMvinjFqQekzglFkVyFEdv_ys').build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
