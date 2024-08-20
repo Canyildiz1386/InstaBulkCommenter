@@ -76,6 +76,18 @@ def increment_order_retries(order_id):
     order.retries += 1
     session.commit()
 
+def get_last_used_user():
+    if os.path.exists('last_used_user.txt'):
+        with open('last_used_user.txt', 'r') as file:
+            last_user_id = int(file.read().strip())
+    else:
+        last_user_id = None
+    return last_user_id
+
+def set_last_used_user(user_id):
+    with open('last_used_user.txt', 'w') as file:
+        file.write(str(user_id))
+
 def login_instagram(driver, username, password):
     print(f"🔑 Logging in as {username}...")
     driver.get("https://www.instagram.com/accounts/login/")
@@ -136,6 +148,15 @@ def login_or_load_cookies(driver, user):
         login_instagram(driver, user.username, user.password)
         save_cookies(driver, cookie_path)
 
+def comment_exists(driver, post_url, comment_text):
+    driver.get(post_url)
+    time.sleep(3)
+    comments = driver.find_elements(By.XPATH, "//div[@role='button']/span")
+    for comment in comments:
+        if comment_text in comment.text:
+            return True
+    return False
+
 def comment_on_post(driver, post_url, comment_text):
     for attempt in range(3):
         try:
@@ -190,7 +211,7 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
     if not driver:
         options = Options()
         options.add_argument('--headless')
-        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
+        driver = webdriver.Firefox(service=FirefoxService('./geckodriver'), options=options)
         login_or_load_cookies(driver, user)
         active_drivers[user.username] = driver
         user.driver_session = True
@@ -203,6 +224,10 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
         if comment_text:
             order_id = save_order(user.username, post_url, 'comment')
             for comment in comment_text:
+                if comment_exists(driver, post_url, comment):
+                    print(f"⚠️ Comment '{comment}' already exists on {post_url} for user {user.username}.")
+                    continue
+
                 success = comment_on_post(driver, post_url, comment)
                 if success:
                     completed_comments += 1
@@ -227,6 +252,38 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
     finally:
         print(f"🔒 Browser session remains open for {user.username}.")
         return completed_comments, completed_replies
+
+async def distribute_comments_among_users(users, comments, context):
+    total_comments = len(comments)
+    total_users = len(users)
+    comments_per_user = total_comments // total_users
+    remainder_comments = total_comments % total_users
+
+    last_used_user_id = get_last_used_user()
+    start_index = 0
+
+    if last_used_user_id:
+        last_user_index = next((index for (index, user) in enumerate(users) if user.id == last_used_user_id), None)
+        start_index = (last_user_index + 1) % total_users if last_user_index is not None else 0
+
+    comment_index = 0
+    for i in range(start_index, start_index + total_users):
+        user = users[i % total_users]
+        user_comments = comments[comment_index:comment_index + comments_per_user]
+        if remainder_comments > 0:
+            user_comments.append(comments[comment_index + comments_per_user])
+            remainder_comments -= 1
+            comment_index += 1
+
+        completed_comments, _ = process_account(user, post_url=context.user_data.get('post_url'), comment_text=user_comments)
+        await context.message.reply_text(
+            f"👤 User {user.username} has completed {completed_comments}/{len(user_comments)} comments."
+        )
+        comment_index += comments_per_user
+
+    set_last_used_user(users[(start_index + total_users - 1) % total_users].id)
+    await context.message.reply_text(f"🏁 All comment actions have been processed.")
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -259,36 +316,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['action'] = 'comment_texts'
         await update.message.reply_text("💬 Now, send me the comments separated by new lines.")
     elif action == 'comment_texts':
-        post_url = context.user_data.get('post_url')
         comments = update.message.text.split('\n')
         comments = [comment.strip() for comment in comments if comment.strip()]
         users = session.query(User).all()
-        total_comments = len(comments)
-        total_users = len(users)
 
-        if total_users == 0:
+        if not users:
             await update.message.reply_text(f"⚠️ No users found in the database.")
             return
 
-        comments_per_user = total_comments // total_users
-        remainder_comments = total_comments % total_users
+        await distribute_comments_among_users(users, comments,context)
 
-        comment_index = 0
-        for user in users:
-            user_comments = comments[comment_index:comment_index + comments_per_user]
-            if remainder_comments > 0:
-                user_comments.append(comments[comment_index + comments_per_user])
-                remainder_comments -= 1
-                comment_index += 1
-            
-            completed_comments, _ = process_account(user, post_url, comment_text=user_comments)
-            await update.message.reply_text(
-                f"👤 User {user.username} has completed {completed_comments}/{len(user_comments)} comments."
-            )
-            comment_index += comments_per_user
-
-        await update.message.reply_text(f"🏁 All comment actions have been processed.")
-    
     elif action == 'reply_to_story_url':
         context.user_data['story_url'] = update.message.text
         context.user_data['action'] = 'reply_texts'
@@ -320,7 +357,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         options = Options()
         options.add_argument('--headless')
       
-        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
+        driver = webdriver.Firefox(service=FirefoxService('./geckodriver'), options=options)
         new_user = get_user(username)
         try:
             login_or_load_cookies(driver, new_user)
@@ -339,7 +376,7 @@ def login_all_users():
     for user in users:
         options = Options()
         options.add_argument('--headless')
-        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
+        driver = webdriver.Firefox(service=FirefoxService('./geckodriver'), options=options)
         try:
             login_or_load_cookies(driver, user)
             active_drivers[user.username] = driver  # Store the active driver session
@@ -361,3 +398,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
