@@ -78,7 +78,7 @@ def increment_order_retries(order_id):
 
 def login_instagram(driver, username, password):
     print(f"🔑 Logging in as {username}...")
-    driver.get("https://www.instagram.com/")
+    driver.get("https://www.instagram.com/accounts/login/")
     time.sleep(3)
     try:
         driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
@@ -101,6 +101,7 @@ def save_cookies(driver, path):
 def load_cookies(driver, path):
     print(f"🍪 Loading cookies from {path}...")
     driver.get("https://www.instagram.com/")
+    
     time.sleep(3)
     with open(path, "rb") as file:
         cookies = pickle.load(file)
@@ -116,8 +117,8 @@ def login_or_load_cookies(driver, user):
     def is_logged_in(driver):
         try:
             # Check if the home page loads by waiting for the profile icon or some other element that's only visible when logged in
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//a[@href="/accounts/edit/"]'))
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "svg[aria-label='Home']"))
             )
             return True
         except Exception:
