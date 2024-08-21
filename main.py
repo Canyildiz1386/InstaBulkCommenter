@@ -8,9 +8,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options
-from webdriver_manager.firefox import GeckoDriverManager
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from sqlalchemy import create_engine, Column, String, Integer, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -210,8 +207,8 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
 
     if not driver:
         options = Options()
-        options.add_argument('--headless')
-        driver = webdriver.Firefox(service=FirefoxService('./geckodriver'), options=options)
+        options.add_argument('--headless')  # Run in headless mode
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver'), options=options)
         login_or_load_cookies(driver, user)
         active_drivers[user.username] = driver
         user.driver_session = True
@@ -355,9 +352,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_user(username, password, cookie_path)
 
         options = Options()
-        options.add_argument('--headless')
-      
-        driver = webdriver.Firefox(service=FirefoxService('./geckodriver'), options=options)
+        options.add_argument('--headless')  # Ensure headless mode is on
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver'), options=options)
         new_user = get_user(username)
         try:
             login_or_load_cookies(driver, new_user)
@@ -375,8 +371,8 @@ def login_all_users():
     users = session.query(User).all()
     for user in users:
         options = Options()
-        options.add_argument('--headless')
-        driver = webdriver.Firefox(service=FirefoxService('./geckodriver'), options=options)
+        options.add_argument('--headless')  # Ensure headless mode is on
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver'), options=options)
         try:
             login_or_load_cookies(driver, user)
             active_drivers[user.username] = driver  # Store the active driver session
@@ -398,4 +394,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
 
