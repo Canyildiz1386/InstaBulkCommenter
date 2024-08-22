@@ -36,7 +36,7 @@ class Order(Base):
     status = Column(String, nullable=False)  # 'pending', 'completed', 'failed'
     retries = Column(Integer, default=0)
 
-engine = create_engine('sqlite:///users.db')
+engine = create_engine('sqlite:///userss.db')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
@@ -93,8 +93,12 @@ def login_instagram(driver, username, password):
         driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
     except Exception:
         pass
-    username_input = driver.find_element(By.NAME, "username")
-    password_input = driver.find_element(By.NAME, "password")
+    username_input = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[1]/div/label/input"))
+        )
+    password_input = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[2]/div/label/input"))
+        )
     username_input.send_keys(username)
     password_input.send_keys(password)
     password_input.send_keys(Keys.ENTER)
@@ -208,7 +212,7 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
     if not driver:
         options = Options()
         options.add_argument('--headless')  # Run in headless mode
-        driver = webdriver.Firefox(service=FirefoxService('geckodriver'), options=options)
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         login_or_load_cookies(driver, user)
         active_drivers[user.username] = driver
         user.driver_session = True
@@ -353,7 +357,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         options = Options()
         options.add_argument('--headless')  # Ensure headless mode is on
-        driver = webdriver.Firefox(service=FirefoxService('geckodriver'), options=options)
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         new_user = get_user(username)
         try:
             login_or_load_cookies(driver, new_user)
@@ -372,7 +376,7 @@ def login_all_users():
     for user in users:
         options = Options()
         options.add_argument('--headless')  # Ensure headless mode is on
-        driver = webdriver.Firefox(service=FirefoxService('geckodriver'), options=options)
+        driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         try:
             login_or_load_cookies(driver, user)
             active_drivers[user.username] = driver  # Store the active driver session
@@ -386,7 +390,7 @@ def login_all_users():
 def main():
     login_all_users()
 
-    application = ApplicationBuilder().token('7447231078:AAFOZU4vSUdMvinjFqQekzglFkVyFEdv_ys').build()
+    application = ApplicationBuilder().token('7476580536:AAFhZS6bM63fWJcSyPn0KfFNpWT5Jh5t4vE').build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
