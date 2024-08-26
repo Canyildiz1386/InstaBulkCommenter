@@ -1,6 +1,6 @@
 import logging
 import time
-import threading
+import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from selenium import webdriver
@@ -8,6 +8,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from sqlalchemy import create_engine, Column, String, Integer, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -15,10 +17,13 @@ from sqlalchemy.exc import IntegrityError
 import pickle
 import os
 
+# Set up logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Set up SQLAlchemy Base
 Base = declarative_base()
 
+# Define the User model
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -26,7 +31,9 @@ class User(Base):
     password = Column(String, nullable=False)
     cookie_path = Column(String, nullable=False)
     driver_session = Column(Boolean, default=False)
+    flag = Column(Boolean, default=False)
 
+# Define the Order model
 class Order(Base):
     __tablename__ = 'orders'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -36,7 +43,8 @@ class Order(Base):
     status = Column(String, nullable=False)  # 'pending', 'completed', 'failed'
     retries = Column(Integer, default=0)
 
-engine = create_engine('sqlite:///userss.db')
+# Set up the database engine and session
+engine = create_engine('sqlite:///users.db')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
@@ -73,31 +81,20 @@ def increment_order_retries(order_id):
     order.retries += 1
     session.commit()
 
-def get_last_used_user():
-    if os.path.exists('last_used_user.txt'):
-        with open('last_used_user.txt', 'r') as file:
-            last_user_id = int(file.read().strip())
-    else:
-        last_user_id = None
-    return last_user_id
-
-def set_last_used_user(user_id):
-    with open('last_used_user.txt', 'w') as file:
-        file.write(str(user_id))
-
 def login_instagram(driver, username, password):
     print(f"🔑 Logging in as {username}...")
-    driver.get("https://www.instagram.com/accounts/login/")
+    driver.get("https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2F&is_from_rle")
     time.sleep(3)
+    print(driver.title)
     try:
         driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
     except Exception:
         pass
     username_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[1]/div/label/input"))
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/div/div/div[1]/div[2]/div/form/div/div[1]/div/label/input"))
         )
     password_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/article/div[2]/div[1]/div[2]/form/div/div[2]/div/label/input"))
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/div/div/div[1]/div[2]/div/form/div/div[2]/div/label/input"))
         )
     username_input.send_keys(username)
     password_input.send_keys(password)
@@ -129,7 +126,6 @@ def login_or_load_cookies(driver, user):
     
     def is_logged_in(driver):
         try:
-            # Check if the home page loads by waiting for the profile icon or some other element that's only visible when logged in
             WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "svg[aria-label='Home']"))
             )
@@ -159,11 +155,11 @@ def comment_exists(driver, post_url, comment_text):
     return False
 
 def comment_on_post(driver, post_url, comment_text):
-    for attempt in range(3):
+    for attempt in range(3):  # Try up to 3 times
         try:
             print(f"💬 Commenting on post: {post_url}...")
             driver.get(post_url)
-            time.sleep(3)
+            time.sleep(3 + random.uniform(1, 3))  # Add a random delay to mimic human behavior
             comment_box = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
             )
@@ -173,7 +169,7 @@ def comment_on_post(driver, post_url, comment_text):
             )
             comment_box_active.send_keys(comment_text)
             comment_box_active.send_keys(Keys.ENTER)
-            time.sleep(3)
+            time.sleep(3 + random.uniform(1, 2))  # Add a random delay to mimic human behavior
             print(f"✅ Commented on post: {post_url}")
             return True
         except Exception as e:
@@ -181,30 +177,7 @@ def comment_on_post(driver, post_url, comment_text):
             time.sleep(2)
     return False
 
-def reply_to_story(driver, story_url, reply_text):
-    for attempt in range(3):
-        try:
-            print(f"💬 Replying to story: {story_url}...")
-            driver.get(story_url)
-            time.sleep(3)
-            reply_box = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Send Message…"]'))
-            )
-            reply_box.click()
-            reply_box_active = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Send Message…"]'))
-            )
-            reply_box_active.send_keys(reply_text)
-            reply_box_active.send_keys(Keys.ENTER)
-            time.sleep(3)
-            print(f"✅ Replied to story: {story_url}")
-            return True
-        except Exception as e:
-            print(f"❌ Error replying to story: {story_url} - {e}")
-            time.sleep(2)
-    return False
-
-def process_account(user, post_url=None, comment_text=None, story_url=None, reply_text=None):
+def process_account(user, post_url, comment_texts):
     print(f"🚀 Starting process for {user.username}...")
 
     driver = active_drivers.get(user.username)
@@ -219,72 +192,32 @@ def process_account(user, post_url=None, comment_text=None, story_url=None, repl
         session.commit()
 
     completed_comments = 0
-    completed_replies = 0
 
     try:
-        if comment_text:
-            order_id = save_order(user.username, post_url, 'comment')
-            for comment in comment_text:
-                if comment_exists(driver, post_url, comment):
-                    print(f"⚠️ Comment '{comment}' already exists on {post_url} for user {user.username}.")
-                    continue
+        for comment_text in comment_texts:
+            if comment_exists(driver, post_url, comment_text):
+                print(f"⚠️ Comment '{comment_text}' already exists on {post_url} for user {user.username}.")
+                continue
 
-                success = comment_on_post(driver, post_url, comment)
-                if success:
-                    completed_comments += 1
-                    update_order_status(order_id, 'completed')
-                else:
-                    increment_order_retries(order_id)
-                    update_order_status(order_id, 'failed')
-                    break
+            success = comment_on_post(driver, post_url, comment_text)
+            if success:
+                completed_comments += 1
+            else:
+                break
 
-        if reply_text:
-            order_id = save_order(user.username, story_url, 'reply')
-            for reply in reply_text:
-                success = reply_to_story(driver, story_url, reply)
-                if success:
-                    completed_replies += 1
-                    update_order_status(order_id, 'completed')
-                else:
-                    increment_order_retries(order_id)
-                    update_order_status(order_id, 'failed')
-                    break
+        # Set the flag to 1 after successful commenting
+        user.flag = True
+        session.commit()
 
     finally:
         print(f"🔒 Browser session remains open for {user.username}.")
-        return completed_comments, completed_replies
+        return completed_comments
 
-async def distribute_comments_among_users(users, comments, context):
-    total_comments = len(comments)
-    total_users = len(users)
-    comments_per_user = total_comments // total_users
-    remainder_comments = total_comments % total_users
-
-    last_used_user_id = get_last_used_user()
-    start_index = 0
-
-    if last_used_user_id:
-        last_user_index = next((index for (index, user) in enumerate(users) if user.id == last_used_user_id), None)
-        start_index = (last_user_index + 1) % total_users if last_user_index is not None else 0
-
-    comment_index = 0
-    for i in range(start_index, start_index + total_users):
-        user = users[i % total_users]
-        user_comments = comments[comment_index:comment_index + comments_per_user]
-        if remainder_comments > 0:
-            user_comments.append(comments[comment_index + comments_per_user])
-            remainder_comments -= 1
-            comment_index += 1
-
-        completed_comments, _ = process_account(user, post_url=context.user_data.get('post_url'), comment_text=user_comments)
-        await context.message.reply_text(
-            f"👤 User {user.username} has completed {completed_comments}/{len(user_comments)} comments."
-        )
-        comment_index += comments_per_user
-
-    set_last_used_user(users[(start_index + total_users - 1) % total_users].id)
-    await context.message.reply_text(f"🏁 All comment actions have been processed.")
-
+def reset_user_flags():
+    users = session.query(User).all()
+    for user in users:
+        user.flag = False
+    session.commit()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -317,15 +250,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['action'] = 'comment_texts'
         await update.message.reply_text("💬 Now, send me the comments separated by new lines.")
     elif action == 'comment_texts':
+        post_url = context.user_data.get('post_url')
         comments = update.message.text.split('\n')
         comments = [comment.strip() for comment in comments if comment.strip()]
-        users = session.query(User).all()
+
+        # Get users with flag = 0
+        users = session.query(User).filter_by(flag=False).all()
 
         if not users:
-            await update.message.reply_text(f"⚠️ No users found in the database.")
-            return
+            # If no users with flag = 0, reset flags and start again
+            reset_user_flags()
+            users = session.query(User).filter_by(flag=False).all()
 
-        await distribute_comments_among_users(users, comments,context)
+        # Distribute comments among users
+        num_users = len(users)
+        num_comments = len(comments)
+
+        comments_per_user = num_comments // num_users
+        remainder_comments = num_comments % num_users
+
+        comment_index = 0
+
+        for i, user in enumerate(users):
+            assigned_comments = comments[comment_index:comment_index + comments_per_user]
+            if i < remainder_comments:
+                assigned_comments.append(comments[comment_index + comments_per_user])
+
+            comment_index += len(assigned_comments)
+
+            completed_comments = process_account(user, post_url=post_url, comment_texts=assigned_comments)
+
+            # Only send a message if at least one comment was posted
+            if completed_comments > 0:
+                await update.message.reply_text(
+                    f"👤 User {user.username} has completed {completed_comments}/{len(assigned_comments)} comments."
+                )
+
+        await update.message.reply_text(f"🏁 All comment actions have been processed.")
 
     elif action == 'reply_to_story_url':
         context.user_data['story_url'] = update.message.text
@@ -336,13 +297,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         replies = update.message.text.split('\n')
         replies = [reply.strip() for reply in replies if reply.strip()]
         users = session.query(User).all()
-        total_replies = len(replies)
+
         for user in users:
-            _, completed_replies = process_account(user, story_url=story_url, reply_text=replies)
-            await update.message.reply_text(
-                f"👤 User {user.username} has completed {completed_replies}/{total_replies} replies."
-            )
+            completed_replies = process_account(user, story_url=story_url, reply_texts=replies)
+
+            # Only send a message if at least one reply was posted
+            if completed_replies > 0:
+                await update.message.reply_text(
+                    f"👤 User {user.username} has completed {completed_replies}/{len(replies)} replies."
+                )
+
         await update.message.reply_text(f"🏁 All reply actions have been processed.")
+
     elif action == 'add_user_username':
         context.user_data['username'] = update.message.text.strip()
         context.user_data['action'] = 'add_user_password'
@@ -390,7 +356,7 @@ def login_all_users():
 def main():
     login_all_users()
 
-    application = ApplicationBuilder().token('7476580536:AAFhZS6bM63fWJcSyPn0KfFNpWT5Jh5t4vE').build()
+    application = ApplicationBuilder().token('7447231078:AAFOZU4vSUdMvinjFqQekzglFkVyFEdv_ys').build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -398,6 +364,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
