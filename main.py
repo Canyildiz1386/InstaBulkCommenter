@@ -71,22 +71,27 @@ def increment_order_retries(order_id):
     session.commit()
 
 def login_instagram(driver, username, password):
+    print("start")
     driver.get("https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2F&is_from_rle")
     time.sleep(3)
     try:
         driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
     except Exception:
         pass
+    # Update input field for usernamee
     username_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/div/div/div[1]/div[2]/div/form/div/div[1]/div/label/input"))
-        )
+        EC.presence_of_element_located((By.NAME, "username"))  # Change to name="usernamee"
+    )
+    # Update input field for password
     password_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[1]/div[2]/div/form/div/div[2]/div/label/input"))
-        )
+        EC.presence_of_element_located((By.NAME, "password"))  # Change to name="password"
+    )
     username_input.send_keys(username)
     password_input.send_keys(password)
     password_input.send_keys(Keys.ENTER)
     time.sleep(5)
+    print("user logged in")
+
 
 def save_cookies(driver, path):
     with open(path, "wb") as file:
