@@ -1,4 +1,3 @@
-import logging
 import time
 import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -17,13 +16,8 @@ from sqlalchemy.exc import IntegrityError
 import pickle
 import os
 
-# Set up logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# Set up SQLAlchemy Base
 Base = declarative_base()
 
-# Define the User model
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -33,23 +27,20 @@ class User(Base):
     driver_session = Column(Boolean, default=False)
     flag = Column(Boolean, default=False)
 
-# Define the Order model
 class Order(Base):
     __tablename__ = 'orders'
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String, nullable=False)
     post_url = Column(String, nullable=False)
-    action_type = Column(String, nullable=False)  # 'comment' or 'reply'
-    status = Column(String, nullable=False)  # 'pending', 'completed', 'failed'
+    action_type = Column(String, nullable=False)
+    status = Column(String, nullable=False)
     retries = Column(Integer, default=0)
 
-# Set up the database engine and session
 engine = create_engine('sqlite:///users.db')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
 
-# Store active driver sessions globally
 active_drivers = {}
 
 def add_user(username, password, cookie_path):
@@ -57,10 +48,8 @@ def add_user(username, password, cookie_path):
         user = User(username=username, password=password, cookie_path=cookie_path)
         session.add(user)
         session.commit()
-        print(f"✅ User {username} added to the database.")
     except IntegrityError:
         session.rollback()
-        print(f"⚠️ User {username} already exists in the database.")
 
 def get_user(username):
     return session.query(User).filter_by(username=username).first()
@@ -82,10 +71,8 @@ def increment_order_retries(order_id):
     session.commit()
 
 def login_instagram(driver, username, password):
-    print(f"🔑 Logging in as {username}...")
     driver.get("https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2F&is_from_rle")
     time.sleep(3)
-    print(driver.title)
     try:
         driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
     except Exception:
@@ -94,24 +81,19 @@ def login_instagram(driver, username, password):
             EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/div/div/div[1]/div[2]/div/form/div/div[1]/div/label/input"))
         )
     password_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div/div[2]/div/div/div[1]/div[1]/div/section/main/div/div/div[1]/div[2]/div/form/div/div[2]/div/label/input"))
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div/div/div[1]/div[2]/div/form/div/div[2]/div/label/input"))
         )
     username_input.send_keys(username)
     password_input.send_keys(password)
     password_input.send_keys(Keys.ENTER)
     time.sleep(5)
-    print(f"✅ Logged in as {username}")
 
 def save_cookies(driver, path):
-    print(f"💾 Saving cookies to {path}...")
     with open(path, "wb") as file:
         pickle.dump(driver.get_cookies(), file)
-    print(f"✅ Cookies saved to {path}")
 
 def load_cookies(driver, path):
-    print(f"🍪 Loading cookies from {path}...")
     driver.get("https://www.instagram.com/")
-    
     time.sleep(3)
     with open(path, "rb") as file:
         cookies = pickle.load(file)
@@ -119,11 +101,9 @@ def load_cookies(driver, path):
             driver.add_cookie(cookie)
     driver.refresh()
     time.sleep(5)
-    print(f"✅ Cookies loaded from {path}")
 
 def login_or_load_cookies(driver, user):
     cookie_path = user.cookie_path
-    
     def is_logged_in(driver):
         try:
             WebDriverWait(driver, 20).until(
@@ -132,15 +112,11 @@ def login_or_load_cookies(driver, user):
             return True
         except Exception:
             return False
-    
     if cookie_path and os.path.exists(cookie_path):
         load_cookies(driver, cookie_path)
         if not is_logged_in(driver):
-            print("⚠️ Cookies loaded but login failed. Trying to login again.")
             login_instagram(driver, user.username, user.password)
             save_cookies(driver, cookie_path)
-        else:
-            print(f"✅ Successfully logged in using cookies for {user.username}.")
     else:
         login_instagram(driver, user.username, user.password)
         save_cookies(driver, cookie_path)
@@ -155,11 +131,10 @@ def comment_exists(driver, post_url, comment_text):
     return False
 
 def comment_on_post(driver, post_url, comment_text):
-    for attempt in range(3):  # Try up to 3 times
+    for attempt in range(3):
         try:
-            print(f"💬 Commenting on post: {post_url}...")
             driver.get(post_url)
-            time.sleep(3 + random.uniform(1, 3))  # Add a random delay to mimic human behavior
+            time.sleep(3 + random.uniform(1, 3))
             comment_box = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, '//textarea[@aria-label="Add a comment…"]'))
             )
@@ -169,48 +144,35 @@ def comment_on_post(driver, post_url, comment_text):
             )
             comment_box_active.send_keys(comment_text)
             comment_box_active.send_keys(Keys.ENTER)
-            time.sleep(3 + random.uniform(1, 2))  # Add a random delay to mimic human behavior
-            print(f"✅ Commented on post: {post_url}")
+            time.sleep(3 + random.uniform(1, 2))
             return True
         except Exception as e:
-            print(f"❌ Error commenting on post: {post_url} - {e}")
             time.sleep(2)
     return False
 
 def process_account(user, post_url, comment_texts):
-    print(f"🚀 Starting process for {user.username}...")
-
     driver = active_drivers.get(user.username)
-
     if not driver:
         options = Options()
-        options.add_argument('--headless')  # Run in headless mode
+        options.add_argument('--headless')
         driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         login_or_load_cookies(driver, user)
         active_drivers[user.username] = driver
         user.driver_session = True
         session.commit()
-
     completed_comments = 0
-
     try:
         for comment_text in comment_texts:
             if comment_exists(driver, post_url, comment_text):
-                print(f"⚠️ Comment '{comment_text}' already exists on {post_url} for user {user.username}.")
                 continue
-
             success = comment_on_post(driver, post_url, comment_text)
             if success:
                 completed_comments += 1
             else:
                 break
-
-        # Set the flag to 1 after successful commenting
         user.flag = True
         session.commit()
-
     finally:
-        print(f"🔒 Browser session remains open for {user.username}.")
         return completed_comments
 
 def reset_user_flags():
@@ -219,11 +181,25 @@ def reset_user_flags():
         user.flag = False
     session.commit()
 
+last_user_index = -1
+
+def distribute_comments_among_users(users, comments):
+    global last_user_index
+    assigned_comments = {}
+    num_users = len(users)
+    num_comments = len(comments)
+    for i in range(num_comments):
+        last_user_index = (last_user_index + 1) % num_users
+        user = users[last_user_index]
+        if user.username not in assigned_comments:
+            assigned_comments[user.username] = []
+        assigned_comments[user.username].append(comments[i])
+    return assigned_comments
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("💬 Comment", callback_data='comment'),
-            InlineKeyboardButton("📩 Reply to Story", callback_data='reply_to_story'),
             InlineKeyboardButton("👤 Add User", callback_data='add_user')
         ]
     ]
@@ -253,39 +229,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         post_url = context.user_data.get('post_url')
         comments = update.message.text.split('\n')
         comments = [comment.strip() for comment in comments if comment.strip()]
-
-        # Get users with flag = 0
         users = session.query(User).filter_by(flag=False).all()
-
         if not users:
-            # If no users with flag = 0, reset flags and start again
             reset_user_flags()
             users = session.query(User).filter_by(flag=False).all()
-
-        # Distribute comments among users
-        num_users = len(users)
-        num_comments = len(comments)
-
-        comments_per_user = num_comments // num_users
-        remainder_comments = num_comments % num_users
-
-        comment_index = 0
-
-        for i, user in enumerate(users):
-            assigned_comments = comments[comment_index:comment_index + comments_per_user]
-            if i < remainder_comments:
-                assigned_comments.append(comments[comment_index + comments_per_user])
-
-            comment_index += len(assigned_comments)
-
-            completed_comments = process_account(user, post_url=post_url, comment_texts=assigned_comments)
-
-            # Only send a message if at least one comment was posted
+        assigned_comments = distribute_comments_among_users(users, comments)
+        for username, user_comments in assigned_comments.items():
+            user = session.query(User).filter_by(username=username).first()
+            completed_comments = process_account(user, post_url=post_url, comment_texts=user_comments)
             if completed_comments > 0:
                 await update.message.reply_text(
-                    f"👤 User {user.username} has completed {completed_comments}/{len(assigned_comments)} comments."
+                    f"👤 User {username} has completed {completed_comments}/{len(user_comments)} comments."
                 )
-
         await update.message.reply_text(f"🏁 All comment actions have been processed.")
 
     elif action == 'reply_to_story_url':
@@ -297,16 +252,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         replies = update.message.text.split('\n')
         replies = [reply.strip() for reply in replies if reply.strip()]
         users = session.query(User).all()
-
         for user in users:
             completed_replies = process_account(user, story_url=story_url, reply_texts=replies)
-
-            # Only send a message if at least one reply was posted
             if completed_replies > 0:
                 await update.message.reply_text(
                     f"👤 User {user.username} has completed {completed_replies}/{len(replies)} replies."
                 )
-
         await update.message.reply_text(f"🏁 All reply actions have been processed.")
 
     elif action == 'add_user_username':
@@ -320,42 +271,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.makedirs(cookie_folder, exist_ok=True)
         cookie_path = os.path.join(cookie_folder, f'cookie_{username}.pkl')
         add_user(username, password, cookie_path)
-
         options = Options()
-        options.add_argument('--headless')  # Ensure headless mode is on
+        options.add_argument('--headless')
         driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         new_user = get_user(username)
         try:
             login_or_load_cookies(driver, new_user)
-            active_drivers[username] = driver  # Store the active driver session
+            active_drivers[username] = driver
             new_user.driver_session = True
             session.commit()
             await update.message.reply_text(f"✅ User {username} added to the database and logged in successfully.")
         except Exception as e:
             await update.message.reply_text(f"❌ User {username} added but login failed: {e}")
-        finally:
-            # Keep the browser session open for further use
-            context.user_data['driver'] = driver
 
 def login_all_users():
     users = session.query(User).all()
     for user in users:
         options = Options()
-        options.add_argument('--headless')  # Ensure headless mode is on
+        options.add_argument('--headless')
         driver = webdriver.Firefox(service=FirefoxService('geckodriver.exe'), options=options)
         try:
             login_or_load_cookies(driver, user)
-            active_drivers[user.username] = driver  # Store the active driver session
+            active_drivers[user.username] = driver
             user.driver_session = True
             session.commit()
-            print(f"✅ Successfully logged in for user {user.username}")
         except Exception as e:
-            print(f"❌ Failed to log in for user {user.username}: {e}")
             driver.quit()
 
 def main():
     login_all_users()
-
     application = ApplicationBuilder().token('7447231078:AAFOZU4vSUdMvinjFqQekzglFkVyFEdv_ys').build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
@@ -364,3 +308,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
