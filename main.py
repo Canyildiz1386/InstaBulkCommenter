@@ -48,8 +48,10 @@ def add_user(username, password, cookie_path):
         user = User(username=username, password=password, cookie_path=cookie_path)
         session.add(user)
         session.commit()
+        print(f"🎉🙌 User {username} added to the database successfully! 🎉")
     except IntegrityError:
         session.rollback()
+        print(f"⚠️👥 User {username} already exists in the database! ⚠️")
 
 def get_user(username):
     return session.query(User).filter_by(username=username).first()
@@ -71,31 +73,29 @@ def increment_order_retries(order_id):
     session.commit()
 
 def login_instagram(driver, username, password):
-    print("start")
+    print(f"🔑🌐 Logging in for {username}...")
     driver.get("https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2F&is_from_rle")
     time.sleep(3)
     try:
         driver.find_element(By.XPATH, "/html/body/div[5]/div[1]/div/div[2]/div/div/div/div/div[2]/div/button[1]").click()
     except Exception:
         pass
-    # Update input field for usernamee
     username_input = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.NAME, "username"))  # Change to name="usernamee"
+        EC.presence_of_element_located((By.NAME, "username"))
     )
-    # Update input field for password
     password_input = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.NAME, "password"))  # Change to name="password"
+        EC.presence_of_element_located((By.NAME, "password"))
     )
     username_input.send_keys(username)
     password_input.send_keys(password)
     password_input.send_keys(Keys.ENTER)
     time.sleep(5)
-    print("user logged in")
-
+    print(f"✅🎉 Successfully logged in as {username}! 🎉🚀")
 
 def save_cookies(driver, path):
     with open(path, "wb") as file:
         pickle.dump(driver.get_cookies(), file)
+    print(f"🍪💾 Cookies saved to {path}! 🍪✅")
 
 def load_cookies(driver, path):
     driver.get("https://www.instagram.com/")
@@ -106,6 +106,7 @@ def load_cookies(driver, path):
             driver.add_cookie(cookie)
     driver.refresh()
     time.sleep(5)
+    print(f"🍪🔄 Cookies loaded from {path}! 🍪🚀")
 
 def login_or_load_cookies(driver, user):
     cookie_path = user.cookie_path
@@ -120,8 +121,11 @@ def login_or_load_cookies(driver, user):
     if cookie_path and os.path.exists(cookie_path):
         load_cookies(driver, cookie_path)
         if not is_logged_in(driver):
+            print(f"⚠️ Failed to log in using cookies, attempting login again! ⚠️")
             login_instagram(driver, user.username, user.password)
             save_cookies(driver, cookie_path)
+        else:
+            print(f"🍪✅ Successfully logged in using cookies for {user.username}! 🍪")
     else:
         login_instagram(driver, user.username, user.password)
         save_cookies(driver, cookie_path)
@@ -150,6 +154,7 @@ def comment_on_post(driver, post_url, comment_text):
             comment_box_active.send_keys(comment_text)
             comment_box_active.send_keys(Keys.ENTER)
             time.sleep(3 + random.uniform(1, 2))
+            print(f"✅💬 Successfully commented on {post_url}! 💬🎉")
             return True
         except Exception as e:
             time.sleep(2)
@@ -169,6 +174,7 @@ def process_account(user, post_url, comment_texts):
     try:
         for comment_text in comment_texts:
             if comment_exists(driver, post_url, comment_text):
+                print(f"⚠️ Comment '{comment_text}' already exists on {post_url}! ⚠️")
                 continue
             success = comment_on_post(driver, post_url, comment_text)
             if success:
@@ -217,9 +223,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'comment':
         await query.edit_message_text(text="📎 Send me the post URL.")
         context.user_data['action'] = 'comment_url'
-    elif query.data == 'reply_to_story':
-        await query.edit_message_text(text="📎 Send me the story URL.")
-        context.user_data['action'] = 'reply_to_story_url'
     elif query.data == 'add_user':
         await query.edit_message_text(text="👤 Please send me the username.")
         context.user_data['action'] = 'add_user_username'
@@ -244,26 +247,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             completed_comments = process_account(user, post_url=post_url, comment_texts=user_comments)
             if completed_comments > 0:
                 await update.message.reply_text(
-                    f"👤 User {username} has completed {completed_comments}/{len(user_comments)} comments."
+                    f"🎉👤 User {username} has completed {completed_comments}/{len(user_comments)} comments! 🎉💬"
                 )
-        await update.message.reply_text(f"🏁 All comment actions have been processed.")
-
-    elif action == 'reply_to_story_url':
-        context.user_data['story_url'] = update.message.text
-        context.user_data['action'] = 'reply_texts'
-        await update.message.reply_text("💬 Now, send me the replies separated by new lines.")
-    elif action == 'reply_texts':
-        story_url = context.user_data.get('story_url')
-        replies = update.message.text.split('\n')
-        replies = [reply.strip() for reply in replies if reply.strip()]
-        users = session.query(User).all()
-        for user in users:
-            completed_replies = process_account(user, story_url=story_url, reply_texts=replies)
-            if completed_replies > 0:
-                await update.message.reply_text(
-                    f"👤 User {user.username} has completed {completed_replies}/{len(replies)} replies."
-                )
-        await update.message.reply_text(f"🏁 All reply actions have been processed.")
+        await update.message.reply_text(f"🏁 All comment actions have been processed successfully! 🎉🏁")
 
     elif action == 'add_user_username':
         context.user_data['username'] = update.message.text.strip()
@@ -285,7 +271,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             active_drivers[username] = driver
             new_user.driver_session = True
             session.commit()
-            await update.message.reply_text(f"✅ User {username} added to the database and logged in successfully.")
+            await update.message.reply_text(f"✅🎉 User {username} added to the database and logged in successfully! 🎉🔑")
         except Exception as e:
             await update.message.reply_text(f"❌ User {username} added but login failed: {e}")
 
@@ -300,7 +286,9 @@ def login_all_users():
             active_drivers[user.username] = driver
             user.driver_session = True
             session.commit()
+            print(f"🎉✅ Successfully logged in for {user.username}! 🎉")
         except Exception as e:
+            print(f"❌ Failed to log in for {user.username}: {e}")
             driver.quit()
 
 def main():
@@ -313,5 +301,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
